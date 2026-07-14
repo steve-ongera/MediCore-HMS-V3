@@ -43,6 +43,15 @@ const NAV_GROUPS = [
     ],
   },
   {
+    label: "Maternal & Child Health",
+    roles: [ROLES.NURSE, ROLES.DOCTOR, ROLES.RECEPTIONIST],
+    links: [
+      { to: "/mch", label: "MCH Dashboard", icon: "bi-heart" },
+      { to: "/mch/antenatal", label: "Antenatal Care", icon: "bi-clipboard2-pulse" },
+      { to: "/mch/children", label: "Child Records", icon: "bi-emoji-smile" },
+    ],
+  },
+  {
     label: "Clinical",
     roles: [ROLES.NURSE, ROLES.DOCTOR],
     links: [
