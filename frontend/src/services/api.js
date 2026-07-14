@@ -321,6 +321,38 @@ export const getProcedureCatalog = (params) => unwrap(client.get(`/procedure-cat
 export const getInpatientProcedures = (params) => unwrap(client.get(`/inpatient-procedures/${qs(params)}`));
 export const completeProcedure = (id) => unwrap(client.post(`/inpatient-procedures/${id}/complete/`));
 
+
+// ===========================================================================
+// MATERNAL & CHILD HEALTH (MCH)
+// ===========================================================================
+export const getAntenatalProfiles = (params) => unwrap(client.get(`/antenatal-profiles/${qs(params)}`));
+export const getAntenatalProfile = (id) => unwrap(client.get(`/antenatal-profiles/${id}/`));
+export const registerAntenatal = (payload) => unwrap(client.post("/antenatal-profiles/", payload));
+export const recordDelivery = (profileId, payload) => unwrap(client.post(`/antenatal-profiles/${profileId}/record-delivery/`, payload));
+
+export const getANCVisits = (params) => unwrap(client.get(`/anc-visits/${qs(params)}`));
+export const createANCVisit = (payload) => unwrap(client.post("/anc-visits/", payload));
+
+export const getDeliveryRecords = (params) => unwrap(client.get(`/delivery-records/${qs(params)}`));
+
+export const getPostnatalVisits = (params) => unwrap(client.get(`/postnatal-visits/${qs(params)}`));
+export const createPostnatalVisit = (payload) => unwrap(client.post("/postnatal-visits/", payload));
+
+export const getChildren = (params) => unwrap(client.get(`/children/${qs(params)}`));
+export const getChild = (id) => unwrap(client.get(`/children/${id}/`));
+export const registerChild = (payload) => unwrap(client.post("/children/", payload));
+export const updateChild = (id, payload) => unwrap(client.patch(`/children/${id}/`, payload));
+
+export const getVaccineCatalog = (params) => unwrap(client.get(`/vaccine-catalog/${qs(params)}`));
+
+export const getChildImmunizations = (params) => unwrap(client.get(`/child-immunizations/${qs(params)}`));
+export const administerImmunization = (id, payload) => unwrap(client.post(`/child-immunizations/${id}/administer/`, payload));
+export const getDueImmunizations = () => unwrap(client.get("/child-immunizations/due/"));
+
+export const getGrowthRecords = (params) => unwrap(client.get(`/growth-monitoring/${qs(params)}`));
+export const createGrowthRecord = (payload) => unwrap(client.post("/growth-monitoring/", payload));
+
+
 // ---------------------------------------------------------------------------
 // Helper: build multipart FormData for endpoints that accept file uploads
 // ---------------------------------------------------------------------------
