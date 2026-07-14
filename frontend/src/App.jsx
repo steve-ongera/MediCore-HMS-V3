@@ -55,6 +55,12 @@ import AdmissionList from "./pages/inpatient/AdmissionList.jsx";
 import AdmitPatient from "./pages/inpatient/AdmitPatient.jsx";
 import AdmissionDetail from "./pages/inpatient/AdmissionDetail.jsx";
 
+import MCHDashboard from "./pages/mch/MCHDashboard.jsx";
+import AntenatalRegister from "./pages/mch/AntenatalRegister.jsx";
+import ANCProfileDetail from "./pages/mch/ANCProfileDetail.jsx";
+import ChildRegister from "./pages/mch/ChildRegister.jsx";
+import ChildDetail from "./pages/mch/ChildDetail.jsx";
+
 // Preserves query params (e.g. ?invoice=xxx) when redirecting old /payments
 // links to the new /billing/payments path.
 function LegacyPaymentsRedirect() {
@@ -358,6 +364,48 @@ export default function App() {
           element={
             <ProtectedRoute allowedRoles={[ROLES.NURSE, ROLES.DOCTOR, ROLES.RECEPTIONIST]}>
               <AdmissionDetail />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Maternal & Child Health */}
+        <Route
+          path="/mch"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.NURSE, ROLES.DOCTOR, ROLES.RECEPTIONIST]}>
+              <MCHDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/mch/antenatal"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.NURSE, ROLES.DOCTOR, ROLES.RECEPTIONIST]}>
+              <AntenatalRegister />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/mch/antenatal/:id"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.NURSE, ROLES.DOCTOR]}>
+              <ANCProfileDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/mch/children"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.NURSE, ROLES.DOCTOR, ROLES.RECEPTIONIST]}>
+              <ChildRegister />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/mch/children/:id"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.NURSE, ROLES.DOCTOR]}>
+              <ChildDetail />
             </ProtectedRoute>
           }
         />
