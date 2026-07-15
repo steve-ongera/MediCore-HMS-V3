@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   getAntenatalProfile, createANCVisit, recordDelivery, createPostnatalVisit,
+  getAntenatalProfileBilling, addAntenatalCharge,
 } from "../../services/api";
+import Modal from "../../components/Modal";
 
 export default function ANCProfileDetail() {
   const { id } = useParams();
@@ -11,6 +13,14 @@ export default function ANCProfileDetail() {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const [billing, setBilling] = useState(null);
+  const [billingLoading, setBillingLoading] = useState(true);
+
+  const [showChargeModal, setShowChargeModal] = useState(false);
+  const [chargeForm, setChargeForm] = useState({ description: "", amount: "" });
+  const [chargeSubmitting, setChargeSubmitting] = useState(false);
+  const [chargeErrors, setChargeErrors] = useState({});
 
   const [ancForm, setAncForm] = useState({
     gestational_age_weeks: "", weight_kg: "", bp_systolic: "", bp_diastolic: "",
@@ -32,6 +42,7 @@ export default function ANCProfileDetail() {
 
   useEffect(() => {
     load();
+    loadBilling();
   }, [id]);
 
   const load = async () => {
@@ -44,6 +55,18 @@ export default function ANCProfileDetail() {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadBilling = async () => {
+    setBillingLoading(true);
+    try {
+      const data = await getAntenatalProfileBilling(id);
+      setBilling(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBillingLoading(false);
     }
   };
 
@@ -61,6 +84,7 @@ export default function ANCProfileDetail() {
         urinalysis: "", hemoglobin_level: "", notes: "", next_appointment: "",
       });
       load();
+      loadBilling();
     } catch (err) {
       setError(err.message);
     }
@@ -82,6 +106,7 @@ export default function ANCProfileDetail() {
         return;
       }
       load();
+      loadBilling();
     } catch (err) {
       setError(err.message);
     }
@@ -96,9 +121,61 @@ export default function ANCProfileDetail() {
         lochia_assessment: "", breastfeeding_status: "", child_weight_kg: "", child_temp_c: "", notes: "",
       });
       load();
+      loadBilling();
     } catch (err) {
       setError(err.message);
     }
+  };
+
+  const handleChargeFormChange = (field) => (e) => {
+    setChargeForm((prev) => ({ ...prev, [field]: e.target.value }));
+    if (chargeErrors[field]) setChargeErrors((prev) => ({ ...prev, [field]: "" }));
+  };
+
+  const validateCharge = () => {
+    const errs = {};
+    if (!chargeForm.description.trim()) errs.description = "Description is required";
+    if (!chargeForm.amount || parseFloat(chargeForm.amount) <= 0) errs.amount = "Amount must be greater than 0";
+    setChargeErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const submitCharge = async (e) => {
+    e.preventDefault();
+    if (!validateCharge()) return;
+    setChargeSubmitting(true);
+    try {
+      await addAntenatalCharge(id, {
+        description: chargeForm.description,
+        amount: parseFloat(chargeForm.amount),
+      });
+      setShowChargeModal(false);
+      setChargeForm({ description: "", amount: "" });
+      loadBilling();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setChargeSubmitting(false);
+    }
+  };
+
+  const goToBillingPayment = () => {
+    const unpaidInvoice = billing?.invoices?.find((inv) => Number(inv.balance) > 0);
+    if (unpaidInvoice) {
+      navigate(`/billing/payments?invoice=${unpaidInvoice.id}`);
+    } else {
+      navigate("/billing/payments");
+    }
+  };
+
+  const getStatusBadge = (status) => {
+    const statusMap = {
+      PAID: "badge-success",
+      PARTIAL: "badge-warning",
+      UNPAID: "badge-danger",
+      CANCELLED: "badge-neutral",
+    };
+    return statusMap[status] || "badge-neutral";
   };
 
   if (loading) {
@@ -128,7 +205,7 @@ export default function ANCProfileDetail() {
           <button className="btn btn-secondary" onClick={() => navigate("/mch/antenatal")}>
             <i className="bi bi-arrow-left me-2"></i> Back
           </button>
-          <button className="btn btn-secondary" onClick={load}>
+          <button className="btn btn-secondary" onClick={() => { load(); loadBilling(); }}>
             <i className="bi bi-arrow-clockwise me-2"></i> Refresh
           </button>
         </div>
@@ -210,6 +287,112 @@ export default function ANCProfileDetail() {
               <div className="diagnosis-chip">
                 <span className="diagnosis-chip__code">RF</span>
                 {profile.risk_factors}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Billing */}
+      <div className="card" style={{ marginBottom: "var(--space-6)" }}>
+        <div className="card-header">
+          <div className="flex items-center gap-3 flex-wrap">
+            <i className="bi bi-currency-dollar me-1"></i>
+            <h5 className="card-title" style={{ marginBottom: 0 }}>Billing</h5>
+          </div>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowChargeModal(true)}>
+            <i className="bi bi-plus-circle me-1"></i> Add Charge
+          </button>
+        </div>
+        <div className="card-body">
+          {billingLoading ? (
+            <div className="loading-screen" style={{ padding: "var(--space-6)" }}>
+              <div className="spinner"></div>
+              <span className="loading-screen__label">Loading billing summary...</span>
+            </div>
+          ) : !billing ? (
+            <div className="text-sm text-muted text-center" style={{ padding: "var(--space-6)" }}>
+              <i className="bi bi-info-circle me-1"></i> No billing data yet.
+            </div>
+          ) : (
+            <div>
+              <div className="stat-grid" style={{ marginBottom: "var(--space-4)" }}>
+                <div className="stat-card">
+                  <div className="stat-card__top">
+                    <span className="stat-card__label">Grand Total</span>
+                    <div className="stat-card__icon tone-info">
+                      <i className="bi bi-receipt"></i>
+                    </div>
+                  </div>
+                  <div className="stat-card__value">KES {billing.grand_total}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-card__top">
+                    <span className="stat-card__label">Amount Paid</span>
+                    <div className="stat-card__icon tone-success">
+                      <i className="bi bi-check-circle"></i>
+                    </div>
+                  </div>
+                  <div className="stat-card__value">KES {billing.amount_paid}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-card__top">
+                    <span className="stat-card__label">Balance</span>
+                    <div className="stat-card__icon tone-warning">
+                      <i className="bi bi-currency-dollar"></i>
+                    </div>
+                  </div>
+                  <div className="stat-card__value">KES {billing.balance}</div>
+                </div>
+              </div>
+
+              <div className="table-scroll">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Invoice #</th>
+                      <th>Description</th>
+                      <th className="cell-numeric">Amount</th>
+                      <th className="cell-numeric">Paid</th>
+                      <th className="cell-numeric">Balance</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {billing.invoices.map((inv) => (
+                      <tr key={inv.id}>
+                        <td className="cell-mono">{inv.invoice_number}</td>
+                        <td>{inv.description}</td>
+                        <td className="cell-numeric">KES {inv.amount}</td>
+                        <td className="cell-numeric">KES {inv.amount_paid}</td>
+                        <td className="cell-numeric">KES {inv.balance}</td>
+                        <td>
+                          <span className={`badge ${getStatusBadge(inv.status)}`}>
+                            <span className="badge-dot"></span>
+                            {inv.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {billing.invoices.length === 0 && (
+                <div className="text-sm text-muted text-center" style={{ padding: "var(--space-6)" }}>
+                  No charges yet. ANC visits, deliveries, and PNC visits will appear here automatically.
+                </div>
+              )}
+
+              <div className="form-actions" style={{ marginTop: "var(--space-4)" }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={goToBillingPayment}
+                  disabled={!billing.invoices.length || Number(billing.balance) <= 0}
+                >
+                  <i className="bi bi-credit-card me-2"></i> Go to Billing / Take Payment
+                </button>
               </div>
             </div>
           )}
@@ -783,6 +966,85 @@ export default function ANCProfileDetail() {
           )}
         </div>
       </div>
+
+      {/* Add Charge Modal */}
+      <Modal
+        show={showChargeModal}
+        onClose={() => {
+          setShowChargeModal(false);
+          setChargeForm({ description: "", amount: "" });
+          setChargeErrors({});
+        }}
+        title="Add Charge"
+        size="modal-md"
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setShowChargeModal(false)}
+              disabled={chargeSubmitting}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={submitCharge}
+              disabled={chargeSubmitting}
+            >
+              {chargeSubmitting ? (
+                <>
+                  <span className="spinner-border spinner-border-sm me-2" role="status" />
+                  Adding...
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-check-lg me-2"></i>
+                  Add Charge
+                </>
+              )}
+            </button>
+          </>
+        }
+      >
+        <form onSubmit={submitCharge}>
+          <div className="field">
+            <label className="field-label" htmlFor="charge_description">
+              Description <span className="required">*</span>
+            </label>
+            <input
+              id="charge_description"
+              type="text"
+              className={`input ${chargeErrors.description ? "has-error" : ""}`}
+              placeholder="e.g. Ultrasound scan, specialist review fee"
+              value={chargeForm.description}
+              onChange={handleChargeFormChange("description")}
+            />
+            {chargeErrors.description && <div className="field-error">{chargeErrors.description}</div>}
+          </div>
+
+          <div className="field">
+            <label className="field-label" htmlFor="charge_amount">
+              Amount <span className="required">*</span>
+            </label>
+            <div className="input-group">
+              <span className="input-addon">KES</span>
+              <input
+                id="charge_amount"
+                type="number"
+                step="0.01"
+                min="0.01"
+                className={`input ${chargeErrors.amount ? "has-error" : ""}`}
+                placeholder="0.00"
+                value={chargeForm.amount}
+                onChange={handleChargeFormChange("amount")}
+              />
+            </div>
+            {chargeErrors.amount && <div className="field-error">{chargeErrors.amount}</div>}
+          </div>
+        </form>
+      </Modal>
     </>
   );
 }

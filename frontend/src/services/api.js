@@ -352,6 +352,8 @@ export const getDueImmunizations = () => unwrap(client.get("/child-immunizations
 export const getGrowthRecords = (params) => unwrap(client.get(`/growth-monitoring/${qs(params)}`));
 export const createGrowthRecord = (payload) => unwrap(client.post("/growth-monitoring/", payload));
 
+export const getAntenatalProfileBilling = (id) => unwrap(client.get(`/antenatal-profiles/${id}/billing/`));
+export const addAntenatalCharge = (id, payload) => unwrap(client.post(`/antenatal-profiles/${id}/add-charge/`, payload));
 
 // ---------------------------------------------------------------------------
 // Helper: build multipart FormData for endpoints that accept file uploads

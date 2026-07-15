@@ -18,8 +18,12 @@ from .serializers import (
     AntenatalProfileSerializer, AntenatalProfileListSerializer, RegisterANCSerializer,
     ANCVisitSerializer, DeliveryRecordSerializer, RecordDeliverySerializer,
     ChildSerializer, ChildListSerializer, PostnatalVisitSerializer,
-    VaccineCatalogSerializer, ChildImmunizationSerializer, GrowthMonitoringSerializer,
+    VaccineCatalogSerializer, ChildImmunizationSerializer, GrowthMonitoringSerializer, AddChargeSerializer
 )
+
+from api.models import Patient, Invoice
+from api.serializers import InvoiceSerializer
+
 from .services import ensure_mch_visit, raise_mch_invoice, schedule_immunizations_for_child
 
 # Flat facility fees for now — move to a configurable fee schedule later if needed.
@@ -27,6 +31,12 @@ ANC_VISIT_FEE = 500
 PNC_VISIT_FEE = 300
 DELIVERY_FEE = 8000
 
+
+# Add this import at the top of views.py, alongside your other imports:
+# from api.models import Patient, Invoice
+# from api.serializers import InvoiceSerializer
+# (adjust the module paths to match wherever Invoice / InvoiceSerializer
+#  actually live in your api app — same place AdmissionViewSet.billing gets them)
 
 class AntenatalProfileViewSet(BaseModelViewSet):
     queryset = AntenatalProfile.objects.select_related("mother").all()
@@ -119,7 +129,75 @@ class AntenatalProfileViewSet(BaseModelViewSet):
             response_data["child"] = ChildSerializer(child).data
         return Response(response_data, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=["get"], url_path="billing")
+    def billing(self, request, pk=None):
+        """
+        Consolidated bill for this mother's MCH care — ANC visits, deliveries,
+        PNC visits, immunizations, and any manually added charges — all raised
+        against the same shared MCH Visit. Same pattern as AdmissionViewSet.billing.
+        """
+        profile = self.get_object()
 
+        if not profile.visit:
+            with transaction.atomic():
+                profile.visit = ensure_mch_visit(profile.mother, registered_by=request.user)
+                profile.save(update_fields=["visit"])
+
+        invoices = Invoice.objects.filter(visit=profile.visit).order_by("created_at")
+
+        breakdown = {}
+        grand_total = 0
+        amount_paid = 0
+        for inv in invoices:
+            bucket = breakdown.setdefault(inv.source_type, {"count": 0, "total": 0, "paid": 0})
+            bucket["count"] += 1
+            bucket["total"] += inv.amount
+            bucket["paid"] += inv.amount_paid
+            grand_total += inv.amount
+            amount_paid += inv.amount_paid
+
+        return Response({
+            "anc_number": profile.anc_number,
+            "mother_name": profile.mother.full_name,
+            "visit_number": profile.visit.visit_number,
+            "invoices": InvoiceSerializer(invoices, many=True).data,
+            "breakdown": {
+                k: {"count": v["count"], "total": str(v["total"]), "paid": str(v["paid"])}
+                for k, v in breakdown.items()
+            },
+            "grand_total": str(grand_total),
+            "amount_paid": str(amount_paid),
+            "balance": str(grand_total - amount_paid),
+        })
+
+    @action(detail=True, methods=["post"], url_path="add-charge")
+    def add_charge(self, request, pk=None):
+        """
+        Ad-hoc billing for anything that doesn't fit a fixed catalog item —
+        e.g. an ultrasound scan, a specialist review fee, extra consumables.
+        Raised against the same shared MCH Visit as every automated charge,
+        so it shows up in this profile's billing and in Billing/Payments
+        exactly like everything else.
+        """
+        profile = self.get_object()
+        serializer = AddChargeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            visit = profile.visit or ensure_mch_visit(profile.mother, registered_by=request.user)
+            if not profile.visit:
+                profile.visit = visit
+                profile.save(update_fields=["visit"])
+
+            invoice = raise_mch_invoice(
+                profile.mother, visit,
+                serializer.validated_data["description"],
+                serializer.validated_data["amount"],
+            )
+
+        return Response(InvoiceSerializer(invoice).data, status=status.HTTP_201_CREATED)
+    
+    
 class ANCVisitViewSet(BaseModelViewSet):
     queryset = ANCVisit.objects.select_related("profile__mother").all()
     serializer_class = ANCVisitSerializer

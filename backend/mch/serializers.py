@@ -170,3 +170,7 @@ class RecordDeliverySerializer(serializers.Serializer):
     birth_length_cm = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
     apgar_score_1min = serializers.IntegerField(required=False, allow_null=True)
     apgar_score_5min = serializers.IntegerField(required=False, allow_null=True)
+    
+class AddChargeSerializer(serializers.Serializer):
+    description = serializers.CharField(max_length=255)
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0.01)
