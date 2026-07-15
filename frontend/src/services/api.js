@@ -354,6 +354,7 @@ export const createGrowthRecord = (payload) => unwrap(client.post("/growth-monit
 
 export const getAntenatalProfileBilling = (id) => unwrap(client.get(`/antenatal-profiles/${id}/billing/`));
 export const addAntenatalCharge = (id, payload) => unwrap(client.post(`/antenatal-profiles/${id}/add-charge/`, payload));
+export const addDeliveryCharge = (deliveryId, payload) => unwrap(client.post(`/delivery-records/${deliveryId}/add-charge/`, payload));
 
 // ---------------------------------------------------------------------------
 // Helper: build multipart FormData for endpoints that accept file uploads

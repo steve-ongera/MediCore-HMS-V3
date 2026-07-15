@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   getAntenatalProfile, createANCVisit, recordDelivery, createPostnatalVisit,
-  getAntenatalProfileBilling, addAntenatalCharge,
+  getAntenatalProfileBilling, addAntenatalCharge, addDeliveryCharge,
 } from "../../services/api";
 import Modal from "../../components/Modal";
 
@@ -21,6 +21,13 @@ export default function ANCProfileDetail() {
   const [chargeForm, setChargeForm] = useState({ description: "", amount: "" });
   const [chargeSubmitting, setChargeSubmitting] = useState(false);
   const [chargeErrors, setChargeErrors] = useState({});
+
+  // Delivery-scoped billing modal
+  const [showDeliveryChargeModal, setShowDeliveryChargeModal] = useState(false);
+  const [selectedDelivery, setSelectedDelivery] = useState(null);
+  const [deliveryChargeForm, setDeliveryChargeForm] = useState({ description: "", amount: "" });
+  const [deliveryChargeSubmitting, setDeliveryChargeSubmitting] = useState(false);
+  const [deliveryChargeErrors, setDeliveryChargeErrors] = useState({});
 
   const [ancForm, setAncForm] = useState({
     gestational_age_weeks: "", weight_kg: "", bp_systolic: "", bp_diastolic: "",
@@ -127,22 +134,25 @@ export default function ANCProfileDetail() {
     }
   };
 
+  // ---------------------------------------------------------------------
+  // General ANC "Add Charge" modal
+  // ---------------------------------------------------------------------
   const handleChargeFormChange = (field) => (e) => {
     setChargeForm((prev) => ({ ...prev, [field]: e.target.value }));
     if (chargeErrors[field]) setChargeErrors((prev) => ({ ...prev, [field]: "" }));
   };
 
-  const validateCharge = () => {
+  const validateCharge = (form, setErrs) => {
     const errs = {};
-    if (!chargeForm.description.trim()) errs.description = "Description is required";
-    if (!chargeForm.amount || parseFloat(chargeForm.amount) <= 0) errs.amount = "Amount must be greater than 0";
-    setChargeErrors(errs);
+    if (!form.description.trim()) errs.description = "Description is required";
+    if (!form.amount || parseFloat(form.amount) <= 0) errs.amount = "Amount must be greater than 0";
+    setErrs(errs);
     return Object.keys(errs).length === 0;
   };
 
   const submitCharge = async (e) => {
     e.preventDefault();
-    if (!validateCharge()) return;
+    if (!validateCharge(chargeForm, setChargeErrors)) return;
     setChargeSubmitting(true);
     try {
       await addAntenatalCharge(id, {
@@ -156,6 +166,43 @@ export default function ANCProfileDetail() {
       setError(err.message);
     } finally {
       setChargeSubmitting(false);
+    }
+  };
+
+  // ---------------------------------------------------------------------
+  // Delivery-scoped "Bill Delivery" modal
+  // ---------------------------------------------------------------------
+  const openDeliveryChargeModal = (delivery) => {
+    setSelectedDelivery(delivery);
+    setDeliveryChargeForm({ description: "", amount: "" });
+    setDeliveryChargeErrors({});
+    setShowDeliveryChargeModal(true);
+  };
+
+  const handleDeliveryChargeFormChange = (field) => (e) => {
+    setDeliveryChargeForm((prev) => ({ ...prev, [field]: e.target.value }));
+    if (deliveryChargeErrors[field]) setDeliveryChargeErrors((prev) => ({ ...prev, [field]: "" }));
+  };
+
+  const submitDeliveryCharge = async (e) => {
+    e.preventDefault();
+    if (!selectedDelivery) return;
+    if (!validateCharge(deliveryChargeForm, setDeliveryChargeErrors)) return;
+    setDeliveryChargeSubmitting(true);
+    try {
+      await addDeliveryCharge(selectedDelivery.id, {
+        description: deliveryChargeForm.description,
+        amount: parseFloat(deliveryChargeForm.amount),
+      });
+      setShowDeliveryChargeModal(false);
+      setSelectedDelivery(null);
+      setDeliveryChargeForm({ description: "", amount: "" });
+      load();
+      loadBilling();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDeliveryChargeSubmitting(false);
     }
   };
 
@@ -774,22 +821,70 @@ export default function ANCProfileDetail() {
                     <th>Mode</th>
                     <th>Outcome</th>
                     <th>Place</th>
+                    <th className="cell-actions"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {(profile.deliveries || []).map((d) => (
-                    <tr key={d.id}>
-                      <td className="cell-mono">{d.delivery_number}</td>
-                      <td>{new Date(d.delivery_date).toLocaleString()}</td>
-                      <td>{d.mode_of_delivery}</td>
-                      <td>
-                        <span className={`badge ${d.outcome === "LIVE_BIRTH" ? "badge-success" : "badge-danger"}`}>
-                          <span className="badge-dot"></span>
-                          {d.outcome}
-                        </span>
-                      </td>
-                      <td>{d.place_of_delivery || "—"}</td>
-                    </tr>
+                    <React.Fragment key={d.id}>
+                      <tr>
+                        <td className="cell-mono">{d.delivery_number}</td>
+                        <td>{new Date(d.delivery_date).toLocaleString()}</td>
+                        <td>{d.mode_of_delivery}</td>
+                        <td>
+                          <span className={`badge ${d.outcome === "LIVE_BIRTH" ? "badge-success" : "badge-danger"}`}>
+                            <span className="badge-dot"></span>
+                            {d.outcome}
+                          </span>
+                        </td>
+                        <td>{d.place_of_delivery || "—"}</td>
+                        <td className="cell-actions">
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => openDeliveryChargeModal(d)}
+                          >
+                            <i className="bi bi-currency-dollar me-1"></i> Bill Delivery
+                          </button>
+                        </td>
+                      </tr>
+                      {(d.charges || []).length > 0 && (
+                        <tr>
+                          <td colSpan={6} style={{ paddingLeft: "var(--space-6)" }}>
+                            <div className="text-sm text-muted" style={{ marginBottom: "var(--space-2)" }}>
+                              Charges for this delivery — Total: KES {d.total_billed}
+                            </div>
+                            <table className="data-table">
+                              <thead>
+                                <tr>
+                                  <th>Invoice #</th>
+                                  <th>Description</th>
+                                  <th className="cell-numeric">Amount</th>
+                                  <th className="cell-numeric">Balance</th>
+                                  <th>Status</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {d.charges.map((c) => (
+                                  <tr key={c.id}>
+                                    <td className="cell-mono">{c.invoice_number}</td>
+                                    <td>{c.description}</td>
+                                    <td className="cell-numeric">KES {c.amount}</td>
+                                    <td className="cell-numeric">KES {c.balance}</td>
+                                    <td>
+                                      <span className={`badge ${getStatusBadge(c.status)}`}>
+                                        <span className="badge-dot"></span>
+                                        {c.status}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>
@@ -967,7 +1062,7 @@ export default function ANCProfileDetail() {
         </div>
       </div>
 
-      {/* Add Charge Modal */}
+      {/* Add Charge Modal (general ANC) */}
       <Modal
         show={showChargeModal}
         onClose={() => {
@@ -1042,6 +1137,94 @@ export default function ANCProfileDetail() {
               />
             </div>
             {chargeErrors.amount && <div className="field-error">{chargeErrors.amount}</div>}
+          </div>
+        </form>
+      </Modal>
+
+      {/* Bill Delivery Modal (scoped to a specific delivery) */}
+      <Modal
+        show={showDeliveryChargeModal}
+        onClose={() => {
+          setShowDeliveryChargeModal(false);
+          setSelectedDelivery(null);
+          setDeliveryChargeForm({ description: "", amount: "" });
+          setDeliveryChargeErrors({});
+        }}
+        title={selectedDelivery ? `Bill Delivery — ${selectedDelivery.delivery_number}` : "Bill Delivery"}
+        size="modal-md"
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setShowDeliveryChargeModal(false)}
+              disabled={deliveryChargeSubmitting}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={submitDeliveryCharge}
+              disabled={deliveryChargeSubmitting}
+            >
+              {deliveryChargeSubmitting ? (
+                <>
+                  <span className="spinner-border spinner-border-sm me-2" role="status" />
+                  Adding...
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-check-lg me-2"></i>
+                  Add Charge
+                </>
+              )}
+            </button>
+          </>
+        }
+      >
+        <form onSubmit={submitDeliveryCharge}>
+          {selectedDelivery && (
+            <p className="text-sm text-muted" style={{ marginBottom: "var(--space-3)" }}>
+              This charge will be linked to delivery <strong>{selectedDelivery.delivery_number}</strong>{" "}
+              ({selectedDelivery.mode_of_delivery}, {new Date(selectedDelivery.delivery_date).toLocaleDateString()}).
+            </p>
+          )}
+          <div className="field">
+            <label className="field-label" htmlFor="delivery_charge_description">
+              Description <span className="required">*</span>
+            </label>
+            <input
+              id="delivery_charge_description"
+              type="text"
+              className={`input ${deliveryChargeErrors.description ? "has-error" : ""}`}
+              placeholder="e.g. Surgical consumables, blood transfusion, theatre time"
+              value={deliveryChargeForm.description}
+              onChange={handleDeliveryChargeFormChange("description")}
+            />
+            {deliveryChargeErrors.description && (
+              <div className="field-error">{deliveryChargeErrors.description}</div>
+            )}
+          </div>
+
+          <div className="field">
+            <label className="field-label" htmlFor="delivery_charge_amount">
+              Amount <span className="required">*</span>
+            </label>
+            <div className="input-group">
+              <span className="input-addon">KES</span>
+              <input
+                id="delivery_charge_amount"
+                type="number"
+                step="0.01"
+                min="0.01"
+                className={`input ${deliveryChargeErrors.amount ? "has-error" : ""}`}
+                placeholder="0.00"
+                value={deliveryChargeForm.amount}
+                onChange={handleDeliveryChargeFormChange("amount")}
+              />
+            </div>
+            {deliveryChargeErrors.amount && <div className="field-error">{deliveryChargeErrors.amount}</div>}
           </div>
         </form>
       </Modal>

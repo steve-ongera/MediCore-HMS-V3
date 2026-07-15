@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from .models import (
     AntenatalProfile, ANCVisit, DeliveryRecord, Child, PostnatalVisit,
-    VaccineCatalog, ChildImmunization, GrowthMonitoring,
+    VaccineCatalog, ChildImmunization, GrowthMonitoring,DeliveryCharge,
 )
 
 
@@ -174,3 +174,20 @@ class RecordDeliverySerializer(serializers.Serializer):
 class AddChargeSerializer(serializers.Serializer):
     description = serializers.CharField(max_length=255)
     amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0.01)
+    
+    
+class DeliveryChargeSerializer(serializers.ModelSerializer):
+    added_by_name = serializers.CharField(source="added_by.get_full_name", read_only=True)
+    invoice_number = serializers.CharField(source="invoice.invoice_number", read_only=True)
+    amount = serializers.DecimalField(source="invoice.amount", max_digits=10, decimal_places=2, read_only=True)
+    amount_paid = serializers.DecimalField(source="invoice.amount_paid", max_digits=10, decimal_places=2, read_only=True)
+    balance = serializers.DecimalField(source="invoice.balance", max_digits=10, decimal_places=2, read_only=True)
+    status = serializers.CharField(source="invoice.status", read_only=True)
+
+    class Meta:
+        model = DeliveryCharge
+        fields = [
+            "id", "delivery", "invoice", "invoice_number", "description",
+            "amount", "amount_paid", "balance", "status", "added_by", "added_by_name", "created_at",
+        ]
+        read_only_fields = ["id", "invoice", "added_by", "created_at"]

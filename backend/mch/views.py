@@ -13,7 +13,7 @@ from api.permissions import ReadOnlyOrSuperAdmin
 from .models import (
     AntenatalProfile, ANCVisit, DeliveryRecord, Child, PostnatalVisit,
     VaccineCatalog, ChildImmunization, GrowthMonitoring,
-    PregnancyStatus, ImmunizationStatus,
+    PregnancyStatus, ImmunizationStatus,DeliveryCharge,
 )
 from .serializers import (
     AntenatalProfileSerializer, AntenatalProfileListSerializer, RegisterANCSerializer,
@@ -106,6 +106,12 @@ class AntenatalProfileViewSet(BaseModelViewSet):
             )
             delivery.invoice = invoice
             delivery.save(update_fields=["invoice"])
+            
+            DeliveryCharge.objects.create(
+                delivery=delivery, invoice=invoice,
+                description=f"Delivery Fee - {data['mode_of_delivery']}",
+                added_by=request.user,
+            )
 
             child = None
             if data["outcome"] == "LIVE_BIRTH":
@@ -218,13 +224,9 @@ class ANCVisitViewSet(BaseModelViewSet):
 
 
 class DeliveryRecordViewSet(BaseModelViewSet):
-    queryset = DeliveryRecord.objects.select_related("profile__mother").all()
+    queryset = DeliveryRecord.objects.select_related("profile__mother").prefetch_related("charges__invoice").all()
     serializer_class = DeliveryRecordSerializer
     filterset_fields = ["profile", "mode_of_delivery", "outcome"]
-    # "post" stays enabled only so the add-charge custom action below can
-    # respond — plain POST /delivery-records/ is explicitly blocked in
-    # create() since delivery records must only be created via
-    # AntenatalProfileViewSet.record_delivery.
     http_method_names = ["get", "post", "head", "options"]
 
     def create(self, request, *args, **kwargs):
@@ -232,13 +234,6 @@ class DeliveryRecordViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="add-charge")
     def add_charge(self, request, pk=None):
-        """
-        Ad-hoc billing scoped to a specific delivery — e.g. surgical
-        consumables for a C-section, blood transfusion, extended theatre
-        time. Raised against the same shared MCH Visit as every other
-        charge for this pregnancy, with the delivery number folded into the
-        description for a clean audit trail on the bill.
-        """
         delivery = self.get_object()
         serializer = AddChargeSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -250,13 +245,21 @@ class DeliveryRecordViewSet(BaseModelViewSet):
                 profile.visit = visit
                 profile.save(update_fields=["visit"])
 
+            description = serializer.validated_data["description"]
             invoice = raise_mch_invoice(
                 profile.mother, visit,
-                f"{serializer.validated_data['description']} ({delivery.delivery_number})",
+                f"{description} ({delivery.delivery_number})",
                 serializer.validated_data["amount"],
             )
 
-        return Response(InvoiceSerializer(invoice).data, status=status.HTTP_201_CREATED)
+            DeliveryCharge.objects.create(
+                delivery=delivery, invoice=invoice,
+                description=description, added_by=request.user,
+            )
+
+        return Response(DeliveryChargeSerializer(
+            DeliveryCharge.objects.select_related("invoice", "added_by").get(invoice=invoice)
+        ).data, status=status.HTTP_201_CREATED)
 
 class PostnatalVisitViewSet(BaseModelViewSet):
     queryset = PostnatalVisit.objects.select_related("profile__mother", "child").all()

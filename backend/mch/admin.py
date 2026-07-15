@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from .models import (
-    AntenatalProfile, ANCVisit, DeliveryRecord, Child, PostnatalVisit,
+    AntenatalProfile, ANCVisit, DeliveryRecord, DeliveryCharge, Child, PostnatalVisit,
     VaccineCatalog, ChildImmunization, GrowthMonitoring,
 )
 
@@ -14,6 +14,13 @@ class ANCVisitInline(admin.TabularInline):
 class DeliveryRecordInline(admin.TabularInline):
     model = DeliveryRecord
     extra = 0
+
+
+class DeliveryChargeInline(admin.TabularInline):
+    model = DeliveryCharge
+    extra = 0
+    fields = ["invoice", "description", "added_by", "created_at"]
+    readonly_fields = ["created_at"]
 
 
 @admin.register(AntenatalProfile)
@@ -29,6 +36,13 @@ class DeliveryRecordAdmin(admin.ModelAdmin):
     list_display = ["delivery_number", "profile", "delivery_date", "mode_of_delivery", "outcome"]
     list_filter = ["mode_of_delivery", "outcome"]
     search_fields = ["delivery_number", "profile__mother__full_name"]
+    inlines = [DeliveryChargeInline]
+
+
+@admin.register(DeliveryCharge)
+class DeliveryChargeAdmin(admin.ModelAdmin):
+    list_display = ["delivery", "description", "invoice", "added_by", "created_at"]
+    search_fields = ["delivery__delivery_number", "description", "invoice__invoice_number"]
 
 
 @admin.register(Child)
