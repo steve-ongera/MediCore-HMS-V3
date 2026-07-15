@@ -99,6 +99,7 @@ class ANCVisit(BaseModel):
         return f"ANC Visit #{self.visit_number} - {self.profile.mother.full_name}"
 
 
+
 class DeliveryMode(models.TextChoices):
     SVD = "SVD", "Spontaneous Vaginal Delivery"
     ASSISTED = "ASSISTED", "Assisted Vaginal Delivery"
@@ -138,6 +139,25 @@ class DeliveryRecord(BaseModel):
     def __str__(self):
         return f"{self.delivery_number} - {self.profile.mother.full_name}"
 
+class DeliveryCharge(BaseModel):
+    """
+    Every invoice raised against a specific delivery — the base delivery fee
+    plus any ad-hoc charges (blood transfusion, theatre time, consumables,
+    etc.). DeliveryRecord.invoice stays as a convenience pointer to the base
+    fee; this table is the full, queryable history.
+    """
+    delivery = models.ForeignKey(DeliveryRecord, on_delete=models.CASCADE, related_name="charges")
+    invoice = models.ForeignKey("api.Invoice", on_delete=models.CASCADE, related_name="delivery_charges")
+    description = models.CharField(max_length=255)
+    added_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name="delivery_charges_added")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "delivery_charges"
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"{self.description} - {self.delivery.delivery_number}"
 
 class Sex(models.TextChoices):
     MALE = "MALE", "Male"
