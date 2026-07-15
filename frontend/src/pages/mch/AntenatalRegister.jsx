@@ -24,9 +24,23 @@ export default function AntenatalRegister() {
 
   const loadProfiles = async () => {
     setLoading(true);
+    setError("");
     try {
-      const data = await getAntenatalProfiles({ page_size: 100 });
-      setProfiles(data.results ?? data);
+      // Walk every page rather than trusting a single page_size to cover
+      // everything — protects against the list silently truncating again
+      // if the record count ever exceeds whatever page_size is requested
+      // (e.g. if a max_page_size cap gets added later).
+      let all = [];
+      let page = 1;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const data = await getAntenatalProfiles({ page, page_size: 100 });
+        const results = data.results ?? data;
+        all = all.concat(results);
+        if (!data.next) break;
+        page += 1;
+      }
+      setProfiles(all);
     } catch (err) {
       setError(err.message);
     } finally {
