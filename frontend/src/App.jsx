@@ -61,6 +61,13 @@ import ANCProfileDetail from "./pages/mch/ANCProfileDetail.jsx";
 import ChildRegister from "./pages/mch/ChildRegister.jsx";
 import ChildDetail from "./pages/mch/ChildDetail.jsx";
 
+import DailyOPDReport from "./pages/reports/DailyOPDReport.jsx";
+import IPDReport from "./pages/reports/IPDReport.jsx";
+import MCHReport from "./pages/reports/MCHReport.jsx";
+import RevenueReport from "./pages/reports/RevenueReport.jsx";
+import DrugConsumptionReport from "./pages/reports/DrugConsumptionReport.jsx";
+import DiseaseStatisticsReport from "./pages/reports/DiseaseStatisticsReport.jsx";
+
 // Preserves query params (e.g. ?invoice=xxx) when redirecting old /payments
 // links to the new /billing/payments path.
 function LegacyPaymentsRedirect() {
@@ -278,6 +285,55 @@ export default function App() {
           element={
             <ProtectedRoute allowedRoles={[ROLES.ACCOUNTANT, ROLES.SUPER_ADMIN]}>
               <Reports />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/reports/opd-daily"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.ACCOUNTANT, ROLES.SUPER_ADMIN]}>
+              <DailyOPDReport />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/reports/ipd"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.ACCOUNTANT, ROLES.SUPER_ADMIN]}>
+              <IPDReport />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/reports/mch"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.ACCOUNTANT, ROLES.SUPER_ADMIN]}>
+              <MCHReport />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/reports/revenue"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.ACCOUNTANT, ROLES.SUPER_ADMIN]}>
+              <RevenueReport />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/reports/drug-consumption"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.ACCOUNTANT, ROLES.SUPER_ADMIN]}>
+              <DrugConsumptionReport />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/reports/disease-statistics"
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.ACCOUNTANT, ROLES.SUPER_ADMIN]}>
+              <DiseaseStatisticsReport />
             </ProtectedRoute>
           }
         />

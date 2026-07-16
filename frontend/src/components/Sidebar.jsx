@@ -89,6 +89,18 @@ const NAV_GROUPS = [
     ],
   },
   {
+    label: "Analytics Reports",
+    roles: [ROLES.ACCOUNTANT],
+    links: [
+      { to: "/reports/opd-daily", label: "Daily OPD Report", icon: "bi-clipboard2-pulse" },
+      { to: "/reports/ipd", label: "IPD Report", icon: "bi-hospital" },
+      { to: "/reports/mch", label: "MCH Report", icon: "bi-heart" },
+      { to: "/reports/revenue", label: "Revenue Report", icon: "bi-cash-coin" },
+      { to: "/reports/drug-consumption", label: "Drug Consumption", icon: "bi-capsule" },
+      { to: "/reports/disease-statistics", label: "Disease Statistics", icon: "bi-clipboard2-data" },
+    ],
+  },
+  {
     label: "Account",
     links: [
       { to: "/profile", label: "My Profile", icon: "bi-person-circle" },

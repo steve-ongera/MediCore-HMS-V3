@@ -875,7 +875,8 @@ class ReportsView(APIView):
     """
     GET /api/reports/?type=daily_revenue|doctor_revenue|department_revenue|patient_statistics
                         |medicine_sales|lab_revenue|radiology_revenue|consultation_revenue|otc_sales
-                        |inpatient_revenue|bed_occupancy
+                        |inpatient_revenue|opd_daily|ipd_report|mch_report|revenue_report
+                        |drug_consumption|disease_statistics
         &date_from=YYYY-MM-DD&date_to=YYYY-MM-DD
     """
     permission_classes = [IsAuthenticated]
@@ -888,12 +889,10 @@ class ReportsView(APIView):
         payments = Payment.objects.filter(paid_at__date__gte=date_from, paid_at__date__lte=date_to)
         invoices = Invoice.objects.filter(created_at__date__gte=date_from, created_at__date__lte=date_to)
 
+        # -------------------------------------------------------------
+        # Legacy simple reports (unchanged)
+        # -------------------------------------------------------------
         if report_type == "daily_revenue":
-            # Combine hospital billing (Payment) with walk-in pharmacy sales
-            # (OTCSale) so the daily revenue report reflects all money taken,
-            # not just hospital invoices. Inpatient bed/medication invoices
-            # are paid through the same Payment model, so they're already
-            # included here automatically — no separate bucket needed.
             hospital_by_day = {
                 row["paid_at__date"]: row["total"] or 0
                 for row in payments.values("paid_at__date").annotate(total=Sum("amount"))
@@ -913,69 +912,296 @@ class ReportsView(APIView):
                 }
                 for d in all_days
             ]
+            return Response({"type": report_type, "date_from": date_from, "date_to": date_to, "data": data})
+
         elif report_type == "doctor_revenue":
             data = list(
                 invoices.filter(source_type=InvoiceSourceType.CONSULTATION, visit__doctor__isnull=False)
                 .values("visit__doctor__first_name", "visit__doctor__last_name")
                 .annotate(total=Sum("amount_paid")).order_by("-total")
             )
+            return Response({"type": report_type, "date_from": date_from, "date_to": date_to, "data": data})
+
         elif report_type == "department_revenue":
             data = list(
                 invoices.filter(source_type=InvoiceSourceType.CONSULTATION)
                 .values("visit__department__name").annotate(total=Sum("amount_paid")).order_by("-total")
             )
+            return Response({"type": report_type, "date_from": date_from, "date_to": date_to, "data": data})
+
         elif report_type == "patient_statistics":
             data = {
                 "total_patients": Patient.objects.count(),
                 "new_patients_in_range": Patient.objects.filter(created_at__date__gte=date_from, created_at__date__lte=date_to).count(),
                 "total_visits_in_range": Visit.objects.filter(visit_date__date__gte=date_from, visit_date__date__lte=date_to).count(),
             }
+            return Response({"type": report_type, "date_from": date_from, "date_to": date_to, "data": data})
+
         elif report_type == "medicine_sales":
             data = list(
                 PharmacyDispense.objects.filter(dispensed_at__date__gte=date_from, dispensed_at__date__lte=date_to)
                 .values("prescription__medicine__name")
                 .annotate(total_qty=Sum("quantity_dispensed")).order_by("-total_qty")
             )
+            return Response({"type": report_type, "date_from": date_from, "date_to": date_to, "data": data})
+
         elif report_type == "otc_sales":
             data = list(
                 OTCSaleItem.objects.filter(sale__sold_at__date__gte=date_from, sale__sold_at__date__lte=date_to)
                 .values("medicine__name")
                 .annotate(total_qty=Sum("quantity"), total_revenue=Sum("subtotal")).order_by("-total_revenue")
             )
+            return Response({"type": report_type, "date_from": date_from, "date_to": date_to, "data": data})
+
         elif report_type == "lab_revenue":
             data = list(invoices.filter(source_type=InvoiceSourceType.LAB).aggregate(total=Sum("amount_paid")).items())
+            return Response({"type": report_type, "date_from": date_from, "date_to": date_to, "data": data})
+
         elif report_type == "radiology_revenue":
             data = list(invoices.filter(source_type=InvoiceSourceType.RADIOLOGY).aggregate(total=Sum("amount_paid")).items())
+            return Response({"type": report_type, "date_from": date_from, "date_to": date_to, "data": data})
+
         elif report_type == "consultation_revenue":
             data = list(invoices.filter(source_type=InvoiceSourceType.CONSULTATION).aggregate(total=Sum("amount_paid")).items())
+            return Response({"type": report_type, "date_from": date_from, "date_to": date_to, "data": data})
+
         elif report_type == "inpatient_revenue":
-            # Bed charges + inpatient medication administrations both raise
-            # Invoice(source_type=INPATIENT / PHARMACY) against the admission's
-            # Visit — but only bed charges use INPATIENT, so this figure is
-            # bed-charge revenue specifically. See breakdown on the per-admission
-            # billing endpoint (/api/admissions/{id}/billing/) for the full mix.
-            inpatient_invoices = invoices.filter(source_type=InvoiceSourceType.INPATIENT)
+            data = list(invoices.filter(source_type=InvoiceSourceType.INPATIENT).aggregate(total=Sum("amount_paid")).items())
+            return Response({"type": report_type, "date_from": date_from, "date_to": date_to, "data": data})
+
+        # -------------------------------------------------------------
+        # New analytical reports: cards + charts + summary table
+        # -------------------------------------------------------------
+        elif report_type == "opd_daily":
+            target_date = date_to
+            visits_qs = Visit.objects.filter(visit_date__date__gte=date_from, visit_date__date__lte=date_to)
+            total_visits = visits_qs.count()
+            total_patients = visits_qs.values("patient").distinct().count()
+            dept_breakdown = list(visits_qs.values("department__name").annotate(count=Count("id")).order_by("-count")[:10])
+            consultation_breakdown = list(visits_qs.values("consultation_type").annotate(count=Count("id")).order_by("-count"))
+            revenue = payments.filter(invoice__source_type=InvoiceSourceType.CONSULTATION).aggregate(t=Sum("amount"))["t"] or 0
+
+            last_7 = [date.today() - timedelta(days=i) for i in range(6, -1, -1)]
+            trend = [{"name": d.isoformat(), "value": Visit.objects.filter(visit_date__date=d).count()} for d in last_7]
+
             data = {
-                "total_billed": str(inpatient_invoices.aggregate(t=Sum("amount"))["t"] or 0),
-                "total_collected": str(inpatient_invoices.aggregate(t=Sum("amount_paid"))["t"] or 0),
-                "invoice_count": inpatient_invoices.count(),
+                "cards": [
+                    {"label": "Total OPD Visits", "value": total_visits},
+                    {"label": "Unique Patients", "value": total_patients},
+                    {"label": "Consultation Revenue", "value": f"KES {revenue}"},
+                    {"label": "Departments Active", "value": len(dept_breakdown)},
+                ],
+                "charts": {
+                    "by_department": {"title": "Visits by Department", "type": "bar",
+                                       "data": [{"name": r["department__name"] or "Unknown", "value": r["count"]} for r in dept_breakdown]},
+                    "trend": {"title": "Visits — Last 7 Days", "type": "line", "data": trend},
+                    "by_type": {"title": "Consultation Type", "type": "pie",
+                                "data": [{"name": r["consultation_type"], "value": r["count"]} for r in consultation_breakdown]},
+                },
+                "table": list(visits_qs.select_related("patient", "department", "doctor").values(
+                    "visit_number", "patient__full_name", "department__name", "status", "visit_date"
+                ).order_by("-visit_date")[:200]),
             }
-        elif report_type == "bed_occupancy":
-            # Snapshot as of now, not date-ranged — occupancy is a current-state
-            # metric, unlike the other reports which are historical.
-            from inpatient.models import Ward
-            data = [
-                {
-                    "ward": w.name,
-                    "ward_type": w.ward_type,
-                    "capacity": w.bed_capacity,
-                    "occupied": w.occupied_beds,
-                    "available": w.bed_capacity - w.occupied_beds,
-                    "occupancy_rate": round((w.occupied_beds / w.bed_capacity * 100), 1) if w.bed_capacity else 0,
-                }
-                for w in Ward.objects.filter(is_active=True)
+            return Response({"type": report_type, "date_from": date_from, "date_to": date_to, **data})
+
+        elif report_type == "ipd_report":
+            from inpatient.models import Admission, AdmissionStatus, Ward
+
+            admissions_qs = Admission.objects.filter(admission_date__date__gte=date_from, admission_date__date__lte=date_to)
+            active_count = Admission.objects.filter(status=AdmissionStatus.ADMITTED).count()
+            admitted_in_range = admissions_qs.count()
+            discharged_in_range = Admission.objects.filter(
+                discharge_date__date__gte=date_from, discharge_date__date__lte=date_to
+            ).count()
+            los_list = [
+                a.length_of_stay_days for a in Admission.objects.filter(
+                    status=AdmissionStatus.DISCHARGED, discharge_date__date__gte=date_from, discharge_date__date__lte=date_to
+                )
             ]
+            avg_los = round(sum(los_list) / len(los_list), 1) if los_list else 0
+
+            ward_occ = [{"name": w.name, "value": w.occupied_beds} for w in Ward.objects.filter(is_active=True)]
+            type_breakdown = list(admissions_qs.values("admission_type").annotate(count=Count("id")))
+            last_7 = [date.today() - timedelta(days=i) for i in range(6, -1, -1)]
+            trend = [{"name": d.isoformat(), "value": Admission.objects.filter(admission_date__date=d).count()} for d in last_7]
+
+            data = {
+                "cards": [
+                    {"label": "Active Admissions", "value": active_count},
+                    {"label": "Admitted (range)", "value": admitted_in_range},
+                    {"label": "Discharged (range)", "value": discharged_in_range},
+                    {"label": "Avg Length of Stay", "value": f"{avg_los} days"},
+                ],
+                "charts": {
+                    "occupancy": {"title": "Bed Occupancy by Ward", "type": "bar", "data": ward_occ},
+                    "trend": {"title": "Admissions — Last 7 Days", "type": "line", "data": trend},
+                    "by_type": {"title": "Admission Type", "type": "pie",
+                                "data": [{"name": r["admission_type"], "value": r["count"]} for r in type_breakdown]},
+                },
+                "table": list(admissions_qs.select_related("patient", "bed__ward").values(
+                    "admission_number", "patient__full_name", "bed__ward__name", "admission_type", "status", "admission_date"
+                ).order_by("-admission_date")[:200]),
+            }
+            return Response({"type": report_type, "date_from": date_from, "date_to": date_to, **data})
+
+        elif report_type == "mch_report":
+            from mch.models import AntenatalProfile, DeliveryRecord, ANCVisit, ChildImmunization, PregnancyStatus, ImmunizationStatus
+
+            active_pregnancies = AntenatalProfile.objects.filter(status=PregnancyStatus.ACTIVE).count()
+            deliveries_qs = DeliveryRecord.objects.filter(delivery_date__date__gte=date_from, delivery_date__date__lte=date_to)
+            deliveries_count = deliveries_qs.count()
+            high_risk = AntenatalProfile.objects.filter(high_risk=True, status=PregnancyStatus.ACTIVE).count()
+            immunizations_due = ChildImmunization.objects.filter(status=ImmunizationStatus.DUE, due_date__lte=date.today()).count()
+
+            mode_breakdown = list(deliveries_qs.values("mode_of_delivery").annotate(count=Count("id")))
+            outcome_breakdown = list(deliveries_qs.values("outcome").annotate(count=Count("id")))
+            last_7 = [date.today() - timedelta(days=i) for i in range(6, -1, -1)]
+            anc_trend = [{"name": d.isoformat(), "value": ANCVisit.objects.filter(visit_date__date=d).count()} for d in last_7]
+
+            data = {
+                "cards": [
+                    {"label": "Active Pregnancies", "value": active_pregnancies},
+                    {"label": "Deliveries (range)", "value": deliveries_count},
+                    {"label": "High Risk Pregnancies", "value": high_risk},
+                    {"label": "Immunizations Due", "value": immunizations_due},
+                ],
+                "charts": {
+                    "by_mode": {"title": "Delivery Mode", "type": "pie",
+                                "data": [{"name": r["mode_of_delivery"], "value": r["count"]} for r in mode_breakdown]},
+                    "anc_trend": {"title": "ANC Visits — Last 7 Days", "type": "line", "data": anc_trend},
+                    "outcomes": {"title": "Delivery Outcomes", "type": "bar",
+                                 "data": [{"name": r["outcome"], "value": r["count"]} for r in outcome_breakdown]},
+                },
+                "table": list(deliveries_qs.select_related("profile__mother").values(
+                    "delivery_number", "profile__mother__full_name", "mode_of_delivery", "outcome", "delivery_date"
+                ).order_by("-delivery_date")[:200]),
+            }
+            return Response({"type": report_type, "date_from": date_from, "date_to": date_to, **data})
+
+        elif report_type == "revenue_report":
+            total_revenue = payments.aggregate(t=Sum("amount"))["t"] or 0
+            outstanding_balance = sum((inv.balance for inv in Invoice.objects.filter(status__in=["UNPAID", "PARTIAL"])))
+            method_breakdown = list(payments.values("method").annotate(total=Sum("amount")))
+            source_breakdown = list(invoices.values("source_type").annotate(total=Sum("amount_paid")))
+            last_7 = [date.today() - timedelta(days=i) for i in range(6, -1, -1)]
+            trend = [
+                {"name": d.isoformat(), "value": float(Payment.objects.filter(paid_at__date=d).aggregate(t=Sum("amount"))["t"] or 0)}
+                for d in last_7
+            ]
+
+            data = {
+                "cards": [
+                    {"label": "Total Revenue", "value": f"KES {total_revenue}"},
+                    {"label": "Outstanding Balance", "value": f"KES {outstanding_balance}"},
+                    {"label": "Total Invoices", "value": invoices.count()},
+                    {"label": "Total Payments", "value": payments.count()},
+                ],
+                "charts": {
+                    "by_method": {"title": "Revenue by Payment Method", "type": "pie",
+                                  "data": [{"name": r["method"], "value": float(r["total"] or 0)} for r in method_breakdown]},
+                    "by_source": {"title": "Revenue by Source", "type": "bar",
+                                  "data": [{"name": r["source_type"], "value": float(r["total"] or 0)} for r in source_breakdown]},
+                    "trend": {"title": "Daily Revenue", "type": "line", "data": trend},
+                },
+                "table": list(payments.select_related("invoice", "cashier").values(
+                    "receipt_number", "invoice__invoice_number", "amount", "method", "paid_at"
+                ).order_by("-paid_at")[:200]),
+            }
+            return Response({"type": report_type, "date_from": date_from, "date_to": date_to, **data})
+
+        elif report_type == "drug_consumption":
+            dispenses_qs = PharmacyDispense.objects.filter(dispensed_at__date__gte=date_from, dispensed_at__date__lte=date_to)
+            otc_qs = OTCSaleItem.objects.filter(sale__sold_at__date__gte=date_from, sale__sold_at__date__lte=date_to)
+            total_dispensed_qty = (dispenses_qs.aggregate(t=Sum("quantity_dispensed"))["t"] or 0) + \
+                                   (otc_qs.aggregate(t=Sum("quantity"))["t"] or 0)
+            low_stock_count = len([m for m in Medicine.objects.all() if m.is_low_stock])
+            stock_transactions_count = StockTransaction.objects.filter(
+                created_at__date__gte=date_from, created_at__date__lte=date_to
+            ).count()
+
+            combined = {}
+            for row in dispenses_qs.values("prescription__medicine__name").annotate(qty=Sum("quantity_dispensed")):
+                name = row["prescription__medicine__name"] or "Unknown"
+                combined[name] = combined.get(name, 0) + (row["qty"] or 0)
+            for row in otc_qs.values("medicine__name").annotate(qty=Sum("quantity")):
+                name = row["medicine__name"] or "Unknown"
+                combined[name] = combined.get(name, 0) + (row["qty"] or 0)
+            top10 = sorted(combined.items(), key=lambda x: -x[1])[:10]
+            top_medicine = top10[0][0] if top10 else "—"
+
+            last_7 = [date.today() - timedelta(days=i) for i in range(6, -1, -1)]
+            trend = [
+                {"name": d.isoformat(), "value": PharmacyDispense.objects.filter(dispensed_at__date=d).aggregate(t=Sum("quantity_dispensed"))["t"] or 0}
+                for d in last_7
+            ]
+            txn_type_breakdown = list(
+                StockTransaction.objects.filter(created_at__date__gte=date_from, created_at__date__lte=date_to)
+                .values("transaction_type").annotate(count=Count("id"))
+            )
+
+            data = {
+                "cards": [
+                    {"label": "Total Units Dispensed", "value": total_dispensed_qty},
+                    {"label": "Top Medicine", "value": top_medicine},
+                    {"label": "Low Stock Alerts", "value": low_stock_count},
+                    {"label": "Stock Transactions", "value": stock_transactions_count},
+                ],
+                "charts": {
+                    "top10": {"title": "Top 10 Medicines Dispensed", "type": "bar",
+                              "data": [{"name": n, "value": q} for n, q in top10]},
+                    "trend": {"title": "Pharmacy Dispenses — Last 7 Days", "type": "line", "data": trend},
+                    "txn_types": {"title": "Stock Transaction Types", "type": "pie",
+                                  "data": [{"name": r["transaction_type"], "value": r["count"]} for r in txn_type_breakdown]},
+                },
+                "table": [{"medicine": n, "total_quantity": q} for n, q in top10],
+            }
+            return Response({"type": report_type, "date_from": date_from, "date_to": date_to, **data})
+
+        elif report_type == "disease_statistics":
+            diagnoses_qs = ConsultationDiagnosis.objects.filter(
+                consultation__started_at__date__gte=date_from, consultation__started_at__date__lte=date_to
+            )
+            total_diagnoses = diagnoses_qs.count()
+            unique_patients = diagnoses_qs.values("consultation__visit__patient").distinct().count()
+            top_row = list(diagnoses_qs.values("icd10_code__description").annotate(count=Count("id")).order_by("-count")[:1])
+            top_diagnosis = top_row[0]["icd10_code__description"] if top_row else "—"
+            this_month_count = ConsultationDiagnosis.objects.filter(
+                consultation__started_at__date__gte=date.today().replace(day=1)
+            ).count()
+
+            top10 = list(
+                diagnoses_qs.values("icd10_code__code", "icd10_code__description")
+                .annotate(count=Count("id")).order_by("-count")[:10]
+            )
+            last_7 = [date.today() - timedelta(days=i) for i in range(6, -1, -1)]
+            trend = [
+                {"name": d.isoformat(), "value": ConsultationDiagnosis.objects.filter(consultation__started_at__date=d).count()}
+                for d in last_7
+            ]
+            category_breakdown = list(
+                diagnoses_qs.values("icd10_code__category").annotate(count=Count("id")).order_by("-count")[:8]
+            )
+
+            data = {
+                "cards": [
+                    {"label": "Total Diagnoses", "value": total_diagnoses},
+                    {"label": "Unique Patients", "value": unique_patients},
+                    {"label": "Top Diagnosis", "value": top_diagnosis},
+                    {"label": "Diagnoses This Month", "value": this_month_count},
+                ],
+                "charts": {
+                    "top10": {"title": "Top 10 Diagnoses", "type": "bar",
+                              "data": [{"name": r["icd10_code__description"] or r["icd10_code__code"], "value": r["count"]} for r in top10]},
+                    "trend": {"title": "Diagnoses — Last 7 Days", "type": "line", "data": trend},
+                    "categories": {"title": "By Category", "type": "pie",
+                                   "data": [{"name": r["icd10_code__category"] or "Unspecified", "value": r["count"]} for r in category_breakdown]},
+                },
+                "table": [
+                    {"code": r["icd10_code__code"], "description": r["icd10_code__description"], "count": r["count"]}
+                    for r in top10
+                ],
+            }
+            return Response({"type": report_type, "date_from": date_from, "date_to": date_to, **data})
+
         else:
             return Response({"detail": "Unknown report type."}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response({"type": report_type, "date_from": date_from, "date_to": date_to, "data": data})
