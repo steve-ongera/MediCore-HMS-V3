@@ -19,7 +19,8 @@ from .serializers import (
     AntenatalProfileSerializer, AntenatalProfileListSerializer, RegisterANCSerializer,
     ANCVisitSerializer, DeliveryRecordSerializer, RecordDeliverySerializer,
     ChildSerializer, ChildListSerializer, PostnatalVisitSerializer,
-    VaccineCatalogSerializer, ChildImmunizationSerializer, GrowthMonitoringSerializer, AddChargeSerializer
+    VaccineCatalogSerializer, ChildImmunizationSerializer, GrowthMonitoringSerializer,
+    AddChargeSerializer, DeliveryChargeSerializer,
 )
 
 from api.models import Patient, Invoice
@@ -234,6 +235,13 @@ class DeliveryRecordViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="add-charge")
     def add_charge(self, request, pk=None):
+        """
+        Ad-hoc billing scoped to a specific delivery — e.g. surgical
+        consumables for a C-section, blood transfusion, extended theatre
+        time. Raised against the same shared MCH Visit as every other
+        charge for this pregnancy, with the delivery number folded into the
+        description for a clean audit trail on the bill.
+        """
         delivery = self.get_object()
         serializer = AddChargeSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -252,15 +260,17 @@ class DeliveryRecordViewSet(BaseModelViewSet):
                 serializer.validated_data["amount"],
             )
 
-            DeliveryCharge.objects.create(
+            charge = DeliveryCharge.objects.create(
                 delivery=delivery, invoice=invoice,
                 description=description, added_by=request.user,
             )
 
-        return Response(DeliveryChargeSerializer(
-            DeliveryCharge.objects.select_related("invoice", "added_by").get(invoice=invoice)
-        ).data, status=status.HTTP_201_CREATED)
-
+        return Response(
+            DeliveryChargeSerializer(charge).data,
+            status=status.HTTP_201_CREATED,
+        )
+        
+        
 class PostnatalVisitViewSet(BaseModelViewSet):
     queryset = PostnatalVisit.objects.select_related("profile__mother", "child").all()
     serializer_class = PostnatalVisitSerializer
